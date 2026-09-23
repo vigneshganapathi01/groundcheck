@@ -1,0 +1,6 @@
+lettucedetect>=0.2.3
+fastapi
+uvicorn[standard]
+python-multipart
+pypdf
+python-docx

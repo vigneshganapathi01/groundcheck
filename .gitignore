@@ -1,0 +1,11 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# OS / editor
+.DS_Store
+.claude/
+
+# Local model cache, if pointed inside the project
+.cache/
