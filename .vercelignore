@@ -1,0 +1,7 @@
+.venv
+build
+tests
+Dockerfile
+.dockerignore
+verify_lettucedetect.py
+app/screenshot.png

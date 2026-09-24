@@ -9,3 +9,6 @@ __pycache__/
 
 # Local model cache, if pointed inside the project
 .cache/
+build/
+.vercel/
+.vercel

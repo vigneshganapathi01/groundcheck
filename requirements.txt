@@ -1,0 +1,10 @@
+# Dependencies for the Vercel deployment (ONNX backend, no PyTorch).
+# For running locally with PyTorch, use app/requirements.txt instead.
+fastapi
+python-multipart
+pypdf
+python-docx
+numpy
+onnxruntime
+tokenizers
+huggingface_hub

@@ -1,7 +1,10 @@
-"""GroundCheck — local web dashboard for LettuceDetect hallucination detection.
+"""GroundCheck — web dashboard for LettuceDetect hallucination detection.
 
-Run:
+Run locally:
     .venv/bin/python app/server.py            # then open http://127.0.0.1:8765
+
+GROUNDCHECK_BACKEND picks how the model runs: "torch" (default locally; base and large
+models) or "onnx" (no PyTorch; used on Vercel; base model only). See engine.py.
 """
 
 from __future__ import annotations
@@ -11,6 +14,11 @@ import threading
 import time
 from pathlib import Path
 
+if os.environ.get("VERCEL"):
+    # Vercel runs this file directly (FastAPI auto-detection). PyTorch is too large for its
+    # functions, so use the ONNX backend and cache the model in /tmp, the only writable path.
+    os.environ.setdefault("GROUNDCHECK_BACKEND", "onnx")
+    os.environ.setdefault("HF_HOME", "/tmp/hf")
 os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
 os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
 
@@ -18,10 +26,15 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from lettucedetect.detectors.prompt_utils import PromptUtils
-from lettucedetect.models.inference import HallucinationDetector
+try:
+    from . import engine as engine_mod  # imported as a package (Vercel entry point)
+except ImportError:
+    import engine as engine_mod  # run as a script: python app/server.py
 
 STATIC_DIR = Path(__file__).parent / "static"
+BACKEND = os.environ.get("GROUNDCHECK_BACKEND", "torch")
+# ONNX export of the base model (weights stored as fp16, compute in fp32; matches PyTorch to <0.001).
+ONNX_REPO = os.environ.get("GROUNDCHECK_ONNX_REPO", "maddyvicky001/lettucedetect-base-modernbert-onnx")
 
 MODELS = {
     "base": {
@@ -36,17 +49,23 @@ MODELS = {
     },
 }
 
-_detectors: dict[str, HallucinationDetector] = {}
+if BACKEND == "onnx":
+    MODELS = {"base": {**MODELS["base"], "size": "~300 MB download"}}
+
+_detectors: dict[str, "engine_mod.Engine"] = {}
 _lock = threading.Lock()
 
 
-def get_detector(key: str) -> HallucinationDetector:
-    """Load a detector once and keep it in memory for later requests."""
+def get_detector(key: str) -> "engine_mod.Engine":
+    """Load a model once and keep it in memory for later requests."""
     with _lock:
         if key not in _detectors:
-            _detectors[key] = HallucinationDetector(
-                method="transformer", model_path=MODELS[key]["id"]
-            )
+            if BACKEND == "onnx":
+                from huggingface_hub import snapshot_download
+
+                _detectors[key] = engine_mod.onnx_engine(snapshot_download(ONNX_REPO))
+            else:
+                _detectors[key] = engine_mod.torch_engine(MODELS[key]["id"])
         return _detectors[key]
 
 
@@ -100,21 +119,6 @@ def list_models() -> dict:
     }
 
 
-def _token_probs(inner, context: list[str], question: str | None, text: str) -> tuple[list[float], int]:
-    """P(hallucinated) for each token of text (plus trailing [SEP]) against the context.
-
-    Long contexts are split into chunks that fit the model. LettuceDetect combines chunks
-    with max(), which flags any fact that appears in only one chunk; here a token counts
-    as supported if ANY chunk supports it (min).
-    """
-    groups = inner._group_passages_into_chunks(context, question, text)
-    runs = [
-        inner._predict_single(PromptUtils.format_context(g, question, inner.lang), text, "tokens")
-        for g in groups
-    ]
-    return [min(run[i]["prob"] for run in runs if i < len(run)) for i in range(len(runs[0]))], len(groups)
-
-
 def _sentences(text: str) -> list[tuple[int, int]]:
     """Character ranges of the sentences (and separate lines) in text."""
     import re
@@ -127,7 +131,7 @@ def _sentences(text: str) -> list[tuple[int, int]]:
     return [(a, b) for a, b in ranges if text[a:b].strip()]
 
 
-def score_answer(inner, context, question, answer, mode) -> tuple[list[dict], int]:
+def score_answer(engine, context, question, answer, mode) -> tuple[list[dict], int]:
     """Score every token of the answer; returns (tokens with char offsets, chunks per pass).
 
     In "sentence" mode each sentence is scored on its own. With the whole answer in one
@@ -139,8 +143,7 @@ def score_answer(inner, context, question, answer, mode) -> tuple[list[dict], in
     tokens, n_chunks = [], 1
     for a, b in pieces:
         text = answer[a:b]
-        probs, n_chunks = _token_probs(inner, context, question, text)
-        offsets = inner.tokenizer(text, add_special_tokens=False, return_offsets_mapping=True)["offset_mapping"]
+        probs, offsets, n_chunks = engine.token_probs(context, question, text)
         for p, (s, e) in zip(probs, offsets):
             if s == e:
                 continue
@@ -183,8 +186,8 @@ def detect(req: DetectRequest) -> dict:
     detector = get_detector(req.model)
     load_s = 0.0 if was_loaded else time.perf_counter() - t0
 
-    inner = detector.detector
-    answer_tokens = len(inner.tokenizer(req.answer, add_special_tokens=False)["input_ids"])
+    inner = detector
+    answer_tokens = inner.count(req.answer)
     if answer_tokens > inner.max_length - 512:
         raise HTTPException(
             413,
@@ -415,8 +418,12 @@ def find_free_port(host: str, start: int, attempts: int = 20) -> int:
 if __name__ == "__main__":
     import uvicorn
 
-    host = "127.0.0.1"
+    # Local default is loopback only; the Docker image sets HOST=0.0.0.0 and PORT=7860.
+    host = os.environ.get("HOST", "127.0.0.1")
     wanted = int(os.environ.get("PORT", "8765"))
+    if os.environ.get("GROUNDCHECK_PRELOAD"):
+        # Load the base model while the server starts, so the first visitor doesn't wait.
+        threading.Thread(target=get_detector, args=("base",), daemon=True).start()
     port = find_free_port(host, wanted)
     if port != wanted:
         print(f"Port {wanted} is already in use (another GroundCheck may be running); using {port} instead.", flush=True)

@@ -27,8 +27,11 @@ Open http://127.0.0.1:8765. The first check downloads the model (~600 MB for bas
   and the page marks the passage in red.
 - **Strictness 0.10–0.95.** The Analysis panel shows how many spans each level (0.30/0.50/0.70/0.80)
   would flag; click a row to apply it.
-- **Known limit:** contradictions made of words that *are* in the context can still slip
-  through (e.g. Saturday's hours given as Sunday's).
+- **Known limits** (of the underlying LettuceDetect model, not the app):
+  - Contradictions made of words that *are* in the context can slip through (e.g. Saturday's
+    hours given as Sunday's).
+  - With a one-sentence context and an answer that simply repeats it, the model flags the
+    answer. It was trained on full RAG passages; realistic documents don't trigger this.
 
 ## Uploading documents
 
