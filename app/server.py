@@ -82,8 +82,21 @@ class DetectRequest(BaseModel):
 
 app = FastAPI(title="GroundCheck")
 
-# Changes whenever the server restarts; open pages compare it to know they're outdated.
-BUILD_ID = str(int(time.time()))
+def _build_id() -> str:
+    """Fingerprint of the deployed code. Open pages compare it to know they're outdated.
+
+    It must come from the code, not the start time: Vercel runs several instances of one
+    deployment, and a time-based id made them disagree, so visitors were wrongly told to reload.
+    """
+    import hashlib
+
+    digest = hashlib.sha256()
+    for name in ("server.py", "engine.py", "static/index.html"):
+        digest.update((Path(__file__).parent / name).read_bytes())
+    return digest.hexdigest()[:12]
+
+
+BUILD_ID = _build_id()
 
 
 @app.get("/")

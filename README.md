@@ -10,10 +10,20 @@ Paste (or upload) the source documents and the AI's response. GroundCheck highli
 of the response the sources don't support, scores every token, and shows how the result changes
 with strictness.
 
-![GroundCheck dashboard](app/screenshot.png)
+![GroundCheck dashboard](screenshots/01-dashboard-result.png)
 
 Built on [LettuceDetect](https://github.com/KRLabsOrg/LettuceDetect) (MIT) by KR Labs, a ModernBERT
 token classifier fine-tuned on RAGTruth. No API keys needed. Run it locally, or use the live demo.
+
+## Screenshots
+
+All taken on the live demo with the travel-policy test: a DOCX policy, and an AI answer with two planted errors.
+
+| | |
+|---|---|
+| ![Result](screenshots/01-dashboard-result.png) **Result:** 2 unsupported spans highlighted, everything else unflagged | ![Strictness trade-off](screenshots/02-strictness-tradeoff.png) **Strictness trade-off:** spans flagged at 0.30 / 0.50 / 0.70 / 0.80 |
+| ![Span actions](screenshots/03-span-actions-and-token-chart.png) **Span actions:** click a highlight to copy it or remove it and re-check | ![Document upload](screenshots/04-document-upload.png) **Document upload:** text extracted from the DOCX, labelled by source |
+| ![Dark mode](screenshots/05-dark-mode.png) **Dark mode** | ![Mobile](screenshots/06-mobile.png) **Mobile** layout |
 
 ## Quick start
 
